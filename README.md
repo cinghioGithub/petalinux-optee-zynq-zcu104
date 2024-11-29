@@ -1,5 +1,7 @@
 # Build OP-TEE with Petalinux for Xilinx zcu104
 
+Tested with Petalinux v2024.2 and OP-TEE v4.1.0
+
 ## Create the project:
 
       $ petalinux-create -t project -s /path/of/bsp/file -n <name-of-the-project>
