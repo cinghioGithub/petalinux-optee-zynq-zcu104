@@ -2,6 +2,8 @@
 
 Tested with Petalinux v2024.2 and OP-TEE v4.1.0
 
+Download the BSP file for the zcu104 from [here](https://www.xilinx.com/support/download/index.html/content/xilinx/en/downloadNav/embedded-design-tools.html).
+
 ## Create the project:
 
       $ petalinux-create -t project -s /path/of/bsp/file -n <name-of-the-project>
