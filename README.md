@@ -41,7 +41,7 @@ Add in the ```project-spec/meta-user/conf/layer.conf```
 
 ## Package the BOOT.bin image:
 
-Copy the file ```bootgen.bif``` in the project main directory
+Copy the file ```bootgen.bif``` in the project main directory and package the BOOT.bin:
 
 	$ petalinux-package boot --bif bootgen.bif --force
 	
