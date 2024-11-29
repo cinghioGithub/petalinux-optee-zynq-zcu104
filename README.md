@@ -12,7 +12,7 @@ Download the BSP file for the zcu104 from [here](https://www.xilinx.com/support/
 
 	$ petalinux-create project -s /path/of/bsp/file -n <name-of-the-project>
  
-## Add the preference to use the Xilinx TF-A in the user:
+## Add the preference to use the Xilinx TF-A in the user configuration:
 
 Add in the ```project-spec/meta-user/conf/layer.conf```
 	
