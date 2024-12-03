@@ -1,5 +1,9 @@
 # Build OP-TEE with Petalinux for Xilinx zcu104
 
+Tested with Petalinux v2024.2 and OP-TEE v4.1.0
+
+Download the BSP file for the zcu104 from [here](https://www.xilinx.com/support/download/index.html/content/xilinx/en/downloadNav/embedded-design-tools.html).
+
 ## Create the project:
 
 ```text
@@ -113,7 +117,7 @@ $ petalinux-build
 
 ## Package the BOOT.bin image:
 
-Copy the file ```bootgen.bif``` in the project main directory
+Copy the file ```bootgen.bif``` in the project main directory and package the BOOT.bin:
 
 ```text
 $ petalinux-package boot --bif bootgen.bif --force
