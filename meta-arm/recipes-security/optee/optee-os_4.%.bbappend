@@ -2,8 +2,11 @@ COMPATIBLE_MACHINE:zynqmp ?= ".*"
 
 PLNX_DEPLOY_DIR ?= "${TOPDIR}/images/linux"
 
+# If you want less verbose output decrese this value
 EXTRA_OEMAKE += " CFG_TEE_CORE_LOG_LEVEL=4"
-EXTRA_OEMAKE += " CFG_TEE_CORE_DEBUG=y"
+
+# Solve a TEE_ERROR_OUT_OF_MEMORY
+EXTRA_OEMAKE += " CFG_TZDRAM_SIZE=0x00500000"
 
 do_compile:append() {
 	${S}/scripts/gen_tee_bin.py --input ${B}/core/tee.elf --out_tee_raw_bin ${B}/core/tee_raw.bin
