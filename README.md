@@ -31,6 +31,14 @@ PREFERRED_VERSION_arm-trusted-firmware = "2.8-xilinx-v2023.2+git"
 $ petalinux-build --sdk
 ```
 
+## Chenage the machine name:
+
+```text
+$ petalinux-config
+```
+
+Navigate to ```Yocto Settings -> Yocto Machine Name``` and change it to ```zynqmp-zcu104```.
+
 ## Append lines to the ``arm-trust-firmware_%.bbappend``:
 
 ```text
@@ -108,6 +116,22 @@ Add this line to the ```<project-root>/project-spec/meta-user/conf/petalinuxbsp.
 ```text
 IMAGE_INSTALL:append = " optee-examples optee-client optee-test"
 ```
+
+## Add user packages:
+
+Add these lines in ```<project-root>/project-spec/configs/rootfsconfigs/user-rootfsconfig```:
+
+```text
+CONFIG_optee-client
+CONFIG_optee-examples
+```
+
+Then enable the packages:
+
+```text
+$ petalinux-config -c rootfs
+```
+Navigate to ```user packages``` and enable ```optee-client``` and ```optee-examples```.
 
 ## Build the project:
 
