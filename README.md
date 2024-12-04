@@ -119,7 +119,7 @@ IMAGE_INSTALL:append = " optee-examples optee-client optee-test"
 
 ## Add user packages:
 
-Add these lines in ```<project-root>/project-spec/configs/rootfsconfigs/user-rootfsconfig```:
+Add these lines in ```<project-root>/project-spec/meta-user/conf/user-rootfsconfig```:
 
 ```text
 CONFIG_optee-client
