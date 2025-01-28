@@ -1,8 +1,8 @@
-# Build OP-TEE with Petalinux for Xilinx zcu104
+# Build OP-TEE with fTPM support, with Petalinux on Xilinx zcu104
 
 This is currently a work in progress.
 
-Testing with Petalinux v2024.2 and OP-TEE v4.1.0
+Testing with Petalinux v2024.2 and OP-TEE v4.3.0
 
 Download the BSP file for the zcu104 from [here](https://www.xilinx.com/support/download/index.html/content/xilinx/en/downloadNav/embedded-design-tools.html).
 
@@ -53,6 +53,16 @@ $ cat meta-xilinx/meta-xilinx-core/recipes-bsp/arm-trusted-firmware/arm-trusted-
 $ petalinux-build -c arm-trusted-firmware
 ```
 
+## Update OP-TEE from ```4.1.0``` to ```4.3.0```
+
+```text
+$ git clone https://git.yoctoproject.org/meta-arm
+
+$ rm -rf <project-root>/components/yocto/layers/meta-arm/recipes-security/*
+
+$ cp -r meta-arm/meta-arm/recipes-security/* <project-root>/components/yocto/layers/meta-arm/recipes-security/
+```
+
 ## Append lines in ```meta-arm/recipes-security/optee``` files:
 
 ```text
@@ -65,10 +75,14 @@ $ cat meta-arm/recipes-security/optee/optee-os-tadevkit_4.%.bbappend >> <project
 $ cat meta-arm/recipes-security/optee/optee-test_4.%.bbappend >> <project-root>/components/yocto/layers/meta-arm/recipes-security/optee/optee-test_4.%.bbappend
 ```
 
+## In ```meta-arm/recipes-security/optee/optee-client.inc```
+
+In ```do_install:append()``` change ```${UNPACKDIR}``` in ```${WORKDIR}```
+
 ## Append lines in ```meta-arm/recipes-security/optee-ftpm``` files:
 
 ```text
-$ cat meta-arm/recipes-security/optee-ftpm/optee-ftpm_.%.bbappend >> <project-root>/components/yocto/layers/meta-arm/recipes-security/optee-ftpm/optee-ftpm_.%.bbappend
+$ cat meta-arm/recipes-security/optee-ftpm/optee-ftpm_%.bbappend >> <project-root>/components/yocto/layers/meta-arm/recipes-security/optee-ftpm/optee-ftpm_%.bbappend
 ```
 
 ## Add device tree node:
@@ -134,6 +148,43 @@ Then enable the packages:
 $ petalinux-config -c rootfs
 ```
 Navigate to ```user packages``` and enable ```optee-client``` and ```optee-examples```.
+
+In addition, navigate to ```Filesystem Packages -> misc -> tpm2``` and enable the following packages:
+
+```text
+tpm2-abrmd
+tpm2-abrmd-dev
+tpm2-pkcs11
+tpm2-tools
+tpm2-tools-dev
+tpm2-tools-dbg
+tpm2-tss
+tpm2-tss-dbg
+tpm2-tss-engine
+tpm2-tss-engine-dev
+```
+
+## Change the boot arguments for loading the rootfs from sd card
+
+```text
+$ petalinux-config -c rootfs
+```
+
+Navigate to ```DTG Settings -> Kernel Bootargs``` and disable ```generate boot args automatically```.
+
+Then set ```console=ttyUSB1,115200 root=/dev/mmcblk0p2 rw rootwait``` in ```user set kernel bootargs```.
+
+Note: Ensure you verify the actual serial port to which the board is connected. 
+In this case, it is USB1, but it may vary depending on your setup. 
+Adjust the `console` boot argument accordingly (e.g., `console=ttyUSB0` or `console=ttyUSB2`).
+
+It is IMPORTANT to verify the packaged image name:
+
+```text
+$ petalinux-config
+```
+ 
+Navigate to `Image Packaging Configuration` and check that `INITRAMFS/INITRD Image name` is set to `petalinux-image-minimal`.
 
 ## Build the project:
 
