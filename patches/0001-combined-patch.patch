@@ -1,0 +1,432 @@
+diff --git a/drivers/char/tpm/tpm-interface.c b/drivers/char/tpm/tpm-interface.c
+index 66b16d26eecc..83228c03e033 100644
+--- a/drivers/char/tpm/tpm-interface.c
++++ b/drivers/char/tpm/tpm-interface.c
+@@ -82,6 +82,7 @@ static ssize_t tpm_try_transmit(struct tpm_chip *chip, void *buf, size_t bufsiz)
+ 		return -E2BIG;
+ 	}
+ 
++	pr_info("tpm_try_transmit --> chip->ops->send\n");
+ 	rc = chip->ops->send(chip, buf, count);
+ 	if (rc < 0) {
+ 		if (rc != -EPIPE)
+@@ -170,6 +171,7 @@ ssize_t tpm_transmit(struct tpm_chip *chip, u8 *buf, size_t bufsiz)
+ 	memcpy(save, buf, save_size);
+ 
+ 	for (;;) {
++		pr_info("tpm_transmit --> tpm_try_transmit\n");
+ 		ret = tpm_try_transmit(chip, buf, bufsiz);
+ 		if (ret < 0)
+ 			break;
+@@ -217,6 +219,7 @@ ssize_t tpm_transmit_cmd(struct tpm_chip *chip, struct tpm_buf *buf,
+ 	int err;
+ 	ssize_t len;
+ 
++	pr_info("tpm_transmit_cmd --> tpm_transmit\n");
+ 	len = tpm_transmit(chip, buf->data, PAGE_SIZE);
+ 	if (len <  0)
+ 		return len;
+@@ -329,6 +332,7 @@ int tpm_pcr_extend(struct tpm_chip *chip, u32 pcr_idx,
+ 	}
+ 
+ 	if (chip->flags & TPM_CHIP_FLAG_TPM2) {
++		pr_info("tpm_pcr_extend: TPM2\n");
+ 		rc = tpm2_pcr_extend(chip, pcr_idx, digests);
+ 		goto out;
+ 	}
+diff --git a/drivers/char/tpm/tpm2-cmd.c b/drivers/char/tpm/tpm2-cmd.c
+index 93545be190a5..12a21f41ca00 100644
+--- a/drivers/char/tpm/tpm2-cmd.c
++++ b/drivers/char/tpm/tpm2-cmd.c
+@@ -262,6 +262,7 @@ int tpm2_pcr_extend(struct tpm_chip *chip, u32 pcr_idx,
+ 			       chip->allocated_banks[i].digest_size);
+ 	}
+ 
++	pr_info("tpm2_pcr_extend --> tpm_transmit_cmd\n");
+ 	rc = tpm_transmit_cmd(chip, &buf, 0, "attempting extend a PCR value");
+ 
+ 	tpm_buf_destroy(&buf);
+diff --git a/drivers/char/tpm/tpm_ftpm_tee.c b/drivers/char/tpm/tpm_ftpm_tee.c
+index 76adb108076c..5ca53e36a8bf 100644
+--- a/drivers/char/tpm/tpm_ftpm_tee.c
++++ b/drivers/char/tpm/tpm_ftpm_tee.c
+@@ -15,10 +15,15 @@
+ #include <linux/tee_drv.h>
+ #include <linux/tpm.h>
+ #include <linux/uuid.h>
++//#include <linux/atomic.h>
+ 
+ #include "tpm.h"
+ #include "tpm_ftpm_tee.h"
+ 
++#include <linux/ima.h>
++#include <linux/rculist.h>
++#include "../../../security/integrity/ima/ima.h"
++
+ /*
+  * TA_FTPM_UUID: BC50D971-D4C9-42C4-82CB-343FB7F37896
+  *
+@@ -80,6 +85,8 @@ static int ftpm_tee_tpm_op_send(struct tpm_chip *chip, u8 *buf, size_t len)
+ 	struct tee_param command_params[4];
+ 	struct tee_shm *shm = pvt_data->shm;
+ 
++	pr_info("ftpm_tee_tpm_op_send\n");
++
+ 	if (len > MAX_COMMAND_SIZE) {
+ 		dev_err(&chip->dev,
+ 			"%s: len=%zd exceeds MAX_COMMAND_SIZE supported by fTPM TA\n",
+@@ -281,6 +288,25 @@ static int ftpm_tee_probe(struct device *dev)
+ 		goto out_chip;
+ 	}
+ 
++	atomic_inc(&ima_reinit); //increments the value of ima_reinit by 1
++	while(atomic_read(&_process_measurement) != 0){}; //busy-wait loop --> continuously checks the value of process_measurement until it becomes 0
++	//wait_event(measurement_wq, atomic_read(&_process_measurement) == 0);
++	ima_tpm_chip = chip;
++	ima_reinit_crypto();
++	ima_init_digests();
++	atomic_set(&ima_reinit, 0); //sets the value of ima_reinit to 0
++	//wake_up(&measurement_wq); // Wake up any waiting processes
++	dev_err(dev, "tpm probe finished successfully\n");
++
++	if (chip->flags & TPM_CHIP_FLAG_TPM2)
++  		pr_info("optee-ftpm is a TPM 2.0\n");
++  
++	pr_info("optee-ftpm->nr_allocated_backs: %d\n", chip->nr_allocated_banks);
++
++	for (int i = 0; i < chip->nr_allocated_banks; i++) {
++		pr_info("optee-ftpm bank digest size: %d\n", chip->allocated_banks[i].digest_size);
++	}
++
+ 	return 0;
+ 
+ out_chip:
+diff --git a/security/integrity/ima/ima.h b/security/integrity/ima/ima.h
+index 07a4586e129c..be95e4389719 100644
+--- a/security/integrity/ima/ima.h
++++ b/security/integrity/ima/ima.h
+@@ -21,9 +21,15 @@
+ #include <linux/tpm.h>
+ #include <linux/audit.h>
+ #include <crypto/hash_info.h>
++#include <linux/atomic.h>
++#include <linux/wait.h> /* for wait_queue_head_t */
+ 
+ #include "../integrity.h"
+ 
++extern atomic_t ima_reinit;
++extern atomic_t _process_measurement;
++extern wait_queue_head_t measurement_wq;
++
+ enum ima_show_type { IMA_SHOW_BINARY, IMA_SHOW_BINARY_NO_FIELD_LEN,
+ 		     IMA_SHOW_BINARY_OLD_STRING_FMT, IMA_SHOW_ASCII };
+ enum tpm_pcrs { TPM_PCR0 = 0, TPM_PCR8 = 8, TPM_PCR10 = 10 };
+@@ -50,10 +56,15 @@ extern int ima_policy_flag;
+ extern atomic_t ima_setxattr_allowed_hash_algorithms;
+ 
+ /* set during initialization */
+-extern int ima_hash_algo __ro_after_init;
+-extern int ima_sha1_idx __ro_after_init;
+-extern int ima_hash_algo_idx __ro_after_init;
+-extern int ima_extra_slots __ro_after_init;
++// extern int ima_hash_algo __ro_after_init;
++// extern int ima_sha1_idx __ro_after_init;
++// extern int ima_hash_algo_idx __ro_after_init;
++// extern int ima_extra_slots __ro_after_init;
++extern int ima_hash_algo;
++extern int ima_sha1_idx;
++extern int ima_hash_algo_idx;
++extern int ima_extra_slots;
++
+ extern int ima_appraise;
+ extern struct tpm_chip *ima_tpm_chip;
+ extern const char boot_aggregate_name[];
+@@ -149,6 +160,7 @@ void ima_add_violation(struct file *file, const unsigned char *filename,
+ 		       struct integrity_iint_cache *iint,
+ 		       const char *op, const char *cause);
+ int ima_init_crypto(void);
++int ima_reinit_crypto(void);
+ void ima_putc(struct seq_file *m, void *data, int datalen);
+ void ima_print_digest(struct seq_file *m, u8 *digest, u32 size);
+ int template_desc_init_fields(const char *template_fmt,
+@@ -164,7 +176,7 @@ int ima_measurements_show(struct seq_file *m, void *v);
+ unsigned long ima_get_binary_runtime_size(void);
+ int ima_init_template(void);
+ void ima_init_template_list(void);
+-int __init ima_init_digests(void);
++int ima_init_digests(void);
+ int ima_lsm_policy_change(struct notifier_block *nb, unsigned long event,
+ 			  void *lsm_data);
+ 
+diff --git a/security/integrity/ima/ima_crypto.c b/security/integrity/ima/ima_crypto.c
+index 51ad29940f05..5344ebd57514 100644
+--- a/security/integrity/ima/ima_crypto.c
++++ b/security/integrity/ima/ima_crypto.c
+@@ -62,13 +62,16 @@ struct ima_algo_desc {
+ 	enum hash_algo algo;
+ };
+ 
+-int ima_sha1_idx __ro_after_init;
+-int ima_hash_algo_idx __ro_after_init;
++// int ima_sha1_idx __ro_after_init;
++// int ima_hash_algo_idx __ro_after_init;
++int ima_sha1_idx;
++int ima_hash_algo_idx;
+ /*
+  * Additional number of slots reserved, as needed, for SHA1
+  * and IMA default algo.
+  */
+-int ima_extra_slots __ro_after_init;
++//int ima_extra_slots __ro_after_init;
++int ima_extra_slots;
+ 
+ static struct ima_algo_desc *ima_algo_array;
+ 
+@@ -88,6 +91,22 @@ static int __init ima_init_ima_crypto(void)
+ 	return 0;
+ }
+ 
++static int ima_reinit_ima_crypto(void)
++{
++	long rc;
++
++	ima_shash_tfm = crypto_alloc_shash(hash_algo_name[ima_hash_algo], 0, 0);
++	if (IS_ERR(ima_shash_tfm)) {
++		rc = PTR_ERR(ima_shash_tfm);
++		pr_err("Can not allocate %s (reason: %ld)\n",
++		       hash_algo_name[ima_hash_algo], rc);
++		return rc;
++	}
++	pr_info("Allocated hash algorithm: %s\n",
++		hash_algo_name[ima_hash_algo]);
++	return 0;
++}
++
+ static struct crypto_shash *ima_alloc_tfm(enum hash_algo algo)
+ {
+ 	struct crypto_shash *tfm = ima_shash_tfm;
+@@ -211,6 +230,118 @@ int __init ima_init_crypto(void)
+ 	return rc;
+ }
+ 
++int ima_reinit_crypto(void)
++{
++    enum hash_algo algo;
++    long rc;
++    int i;
++
++	pr_err("ima reinit started successfully\n");
++    
++    /* Clear old ima_algo_array and associated tfm(s) */
++    for (i = 0; i < ima_extra_slots; i++) {
++        if (!ima_algo_array[i].tfm || ima_algo_array[i].tfm == ima_shash_tfm)
++            continue;
++
++        crypto_free_shash(ima_algo_array[i].tfm);
++    }
++    kfree(ima_algo_array);
++
++	// rc = ima_reinit_ima_crypto();
++    // if (rc)
++    //     return rc;
++
++    ima_sha1_idx = -1;
++    ima_hash_algo_idx = -1;
++
++    for (i = 0; i < NR_BANKS(ima_tpm_chip); i++) {
++        algo = ima_tpm_chip->allocated_banks[i].crypto_id;
++        if (algo == HASH_ALGO_SHA1)
++            ima_sha1_idx = i;
++
++        if (algo == ima_hash_algo)
++            ima_hash_algo_idx = i;
++    }
++
++    if (ima_sha1_idx < 0) {
++        ima_sha1_idx = NR_BANKS(ima_tpm_chip) + ima_extra_slots++;
++        if (ima_hash_algo == HASH_ALGO_SHA1)
++            ima_hash_algo_idx = ima_sha1_idx;
++    }
++
++    if (ima_hash_algo_idx < 0)
++        ima_hash_algo_idx = NR_BANKS(ima_tpm_chip) + ima_extra_slots++;
++
++    ima_algo_array = kcalloc(NR_BANKS(ima_tpm_chip) + ima_extra_slots,
++                             sizeof(*ima_algo_array), GFP_KERNEL);
++    if (!ima_algo_array) {
++        rc = -ENOMEM;
++        goto out;
++    }
++
++    for (i = 0; i < NR_BANKS(ima_tpm_chip); i++) {
++        algo = ima_tpm_chip->allocated_banks[i].crypto_id;
++        ima_algo_array[i].algo = algo;
++
++        /* Unknown TPM algorithm */
++        if (algo == HASH_ALGO__LAST)
++            continue;
++
++        if (algo == ima_hash_algo) {
++            ima_algo_array[i].tfm = ima_shash_tfm;
++            continue;
++        }
++
++        ima_algo_array[i].tfm = ima_alloc_tfm(algo);
++        if (IS_ERR(ima_algo_array[i].tfm)) {
++            if (algo == HASH_ALGO_SHA1) {
++                rc = PTR_ERR(ima_algo_array[i].tfm);
++                ima_algo_array[i].tfm = NULL;
++                goto out_array;
++            }
++
++            ima_algo_array[i].tfm = NULL;
++        }
++    }
++
++    if (ima_sha1_idx >= NR_BANKS(ima_tpm_chip)) {
++        if (ima_hash_algo == HASH_ALGO_SHA1) {
++            ima_algo_array[ima_sha1_idx].tfm = ima_shash_tfm;
++        } else {
++            ima_algo_array[ima_sha1_idx].tfm = ima_alloc_tfm(HASH_ALGO_SHA1);
++            if (IS_ERR(ima_algo_array[ima_sha1_idx].tfm)) {
++                rc = PTR_ERR(ima_algo_array[ima_sha1_idx].tfm);
++                goto out_array;
++            }
++        }
++
++        ima_algo_array[ima_sha1_idx].algo = HASH_ALGO_SHA1;
++    }
++
++    if (ima_hash_algo_idx >= NR_BANKS(ima_tpm_chip) &&
++        ima_hash_algo_idx != ima_sha1_idx) {
++        ima_algo_array[ima_hash_algo_idx].tfm = ima_shash_tfm;
++        ima_algo_array[ima_hash_algo_idx].algo = ima_hash_algo;
++    }
++
++	pr_err("ima reinit finished successfully\n");
++    return 0;
++
++out_array:
++    for (i = 0; i < NR_BANKS(ima_tpm_chip) + ima_extra_slots; i++) {
++        if (!ima_algo_array[i].tfm || ima_algo_array[i].tfm == ima_shash_tfm)
++            continue;
++
++        crypto_free_shash(ima_algo_array[i].tfm);
++    }
++    kfree(ima_algo_array);
++
++out:
++    crypto_free_shash(ima_shash_tfm);
++	
++    return rc;
++}
++
+ static void ima_free_tfm(struct crypto_shash *tfm)
+ {
+ 	int i;
+diff --git a/security/integrity/ima/ima_init.c b/security/integrity/ima/ima_init.c
+index 63979aefc95f..e096948ec912 100644
+--- a/security/integrity/ima/ima_init.c
++++ b/security/integrity/ima/ima_init.c
+@@ -20,6 +20,10 @@
+ 
+ #include "ima.h"
+ 
++atomic_t ima_reinit=ATOMIC_INIT(0);
++atomic_t _process_measurement=ATOMIC_INIT(0);
++DECLARE_WAIT_QUEUE_HEAD(measurement_wq); // Declare a wait queue
++
+ /* name for boot aggregate entry */
+ const char boot_aggregate_name[] = "boot_aggregate";
+ struct tpm_chip *ima_tpm_chip;
+@@ -117,6 +121,9 @@ int __init ima_init(void)
+ {
+ 	int rc;
+ 
++	atomic_set(&ima_reinit, 0);
++	atomic_set(&_process_measurement, 0);
++
+ 	ima_tpm_chip = tpm_default_chip();
+ 	if (!ima_tpm_chip)
+ 		pr_info("No TPM chip found, activating TPM-bypass!\n");
+diff --git a/security/integrity/ima/ima_main.c b/security/integrity/ima/ima_main.c
+index cc1217ac2c6f..0be93939b66d 100644
+--- a/security/integrity/ima/ima_main.c
++++ b/security/integrity/ima/ima_main.c
+@@ -223,8 +223,15 @@ static int process_measurement(struct file *file, const struct cred *cred,
+ 	enum hash_algo hash_algo;
+ 	unsigned int allowed_algos = 0;
+ 
+-	if (!ima_policy_flag || !S_ISREG(inode->i_mode))
++	while(atomic_read(&ima_reinit) == 1){}; //busy-wait loop --> waits for ima_reinit to become 0 before proceeding
++	// wait_event(measurement_wq, atomic_read(&ima_reinit) == 0);
++	atomic_inc(&_process_measurement);
++
++	if (!ima_policy_flag || !S_ISREG(inode->i_mode)) {
++		atomic_dec(&_process_measurement);
++		// wake_up(&measurement_wq);
+ 		return 0;
++	}
+ 
+ 	/* Return an IMA_MEASURE, IMA_APPRAISE, IMA_AUDIT action
+ 	 * bitmask based on the appraise/audit/measurement policy.
+@@ -236,8 +243,11 @@ static int process_measurement(struct file *file, const struct cred *cred,
+ 	violation_check = ((func == FILE_CHECK || func == MMAP_CHECK ||
+ 			    func == MMAP_CHECK_REQPROT) &&
+ 			   (ima_policy_flag & IMA_MEASURE));
+-	if (!action && !violation_check)
++	if (!action && !violation_check) {
++		atomic_dec(&_process_measurement);
++		// wake_up(&measurement_wq);
+ 		return 0;
++	}
+ 
+ 	must_appraise = action & IMA_APPRAISE;
+ 
+@@ -395,6 +405,7 @@ static int process_measurement(struct file *file, const struct cred *cred,
+ 				    pathname, "collect_data",
+ 				    "denied-hash-algorithm", rc, 0);
+ 	}
++	
+ out_locked:
+ 	if ((mask & MAY_WRITE) && test_bit(IMA_DIGSIG, &iint->atomic_flags) &&
+ 	     !(iint->flags & IMA_NEW_FILE))
+@@ -406,11 +417,16 @@ static int process_measurement(struct file *file, const struct cred *cred,
+ 	if (pathbuf)
+ 		__putname(pathbuf);
+ 	if (must_appraise) {
+-		if (rc && (ima_appraise & IMA_APPRAISE_ENFORCE))
++		if (rc && (ima_appraise & IMA_APPRAISE_ENFORCE)) {
++			atomic_dec(&_process_measurement); //decrements process_measurement
++			// wake_up(&measurement_wq);
+ 			return -EACCES;
++		}
+ 		if (file->f_mode & FMODE_WRITE)
+ 			set_bit(IMA_UPDATE_XATTR, &iint->atomic_flags);
+ 	}
++	atomic_dec(&_process_measurement); //decrements process_measurement
++	// wake_up(&measurement_wq);
+ 	return 0;
+ }
+ 
+diff --git a/security/integrity/ima/ima_queue.c b/security/integrity/ima/ima_queue.c
+index 532da87ce519..b89d0ae4c3cd 100644
+--- a/security/integrity/ima/ima_queue.c
++++ b/security/integrity/ima/ima_queue.c
+@@ -142,6 +142,7 @@ static int ima_pcr_extend(struct tpm_digest *digests_arg, int pcr)
+ 	if (!ima_tpm_chip)
+ 		return result;
+ 
++	pr_info("Adding entry to PCR\n");
+ 	result = tpm_pcr_extend(ima_tpm_chip, pcr, digests_arg);
+ 	if (result != 0)
+ 		pr_err("Error Communicating to TPM chip, result: %d\n", result);
+@@ -211,7 +212,7 @@ int ima_restore_measurement_entry(struct ima_template_entry *entry)
+ 	return result;
+ }
+ 
+-int __init ima_init_digests(void)
++int ima_init_digests(void)
+ {
+ 	u16 digest_size;
+ 	u16 crypto_id;
