@@ -284,6 +284,9 @@ Navigate to ```user packages``` and enable ```my-ima-policy``` .
 
 Place these files in the same directory (keylime).
 
+### Note
+The file keylime_agent is not included in this repository because its size exceeds GitHub's 100 MB file size limit.
+
 ### 2. Update the PetaLinux BSP Configuration
 
 - **Target File:**  
