@@ -77,7 +77,7 @@ rm -rf <petalinux-proj>/components/yocto/layers/meta-arm/recipes-security/optee
 rm -rf <petalinux-proj>/components/yocto/layers/meta-arm/recipes-security/optee-ftpm
 ```
 
-Clone or download the updated version from the following github:  !!SCRIVI GITHUB!!
+Clone or download optee and optee-ftpm updated versions from meta-arm/recipes-security/ 
 
 ### Note
 In this version, everything required for measured boot is integrated.
