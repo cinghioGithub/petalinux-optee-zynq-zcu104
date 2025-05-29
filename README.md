@@ -316,6 +316,81 @@ $ petalinux-config -c rootfs
 ```
 Navigate to ```user packages``` and enable ```keylime``` .
 
+## Enable MLDsa Signature Support via liboqs Integration
+
+This section explains how to integrate liboqs (v0.10.0) into a PetaLinux project to enable support for MLDsa post-quantum signatures across OP-TEE, fTPM, and the TPM2 software stack.
+
+### 1. Add the liboqs Recipe
+
+  - **Target Directory:**
+
+    `<project-root>/project-spec/meta-user/recipes-tpm/liboqs/`
+
+  - **Action:**
+
+      Create the directory **recipes-tpm/liboqs/** if it doesn't exist. Add the following recipe:
+
+        liboqs_0.10.0.bb
+
+### 2. Update OP-TEE and fTPM Recipes to Depend on liboqs
+
+  - **Target Directory:**
+
+    `<project-root>/components/yocto/layers/meta-arm/recipes-security/`
+
+    Modified Files:
+
+        optee-os-tadevkit_4.5.0.bb
+
+        optee-ftpm_git.bb
+
+        optee-os_4.5.0.bb
+
+        optee-os_4.%.bbappend
+
+  - **Action:**
+
+    The listed recipes have been updated to integrate liboqs support, including necessary adjustments to build steps, dependencies, and library usage where required.
+
+### 3. Update TPM2 Software Stack
+
+  - **Target Files:**
+
+      TPM2-Tools:
+
+      `<project-root>/components/yocto/layers/meta-security/meta-tpm/recipes-tpm2/tpm2-tools/tpm2-tools_5.7.2.bb`
+
+      TPM2-Tss:
+
+      `<project-root>/components/yocto/layers/meta-security/meta-tpm/recipes-tpm2/tpm2-tss/tpm2-tss_3.2.2.1.bb`
+
+  - **Action:**
+
+    The recipe sources have been updated to point to modified upstream archives compatible with liboqs, and the recipes have been adapted accordingly to support these updated versions.
+
+### 4. Patch the Linux Kernel
+
+  - **Target Patch File:**
+
+    `<project-root>/project-spec/meta-user/recipes-kernel/linux/linux-xlnx/0002-combined-patch.patch`
+
+  - **Action:**
+
+      Apply the patch to introduce support for liboqs-related features.
+
+      Modify the following file:
+
+      `project-root/project-spec/meta-user/recipes-kernel/linux/linux-xlnx_%.bbappend`
+
+
+    Append the following lines to SRC_URI:
+
+        SRC_URI += "file://0001-combined-patch.patch \
+                    file://0002-combined-patch.patch \
+                    file://ima_hash.cfg \
+                   "
+
+
 
 ## Change the boot arguments for loading the rootfs from sd card
 

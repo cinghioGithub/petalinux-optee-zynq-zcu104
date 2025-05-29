@@ -4,7 +4,13 @@ SUMMARY = "OP-TEE Trusted OS TA devkit"
 DESCRIPTION = "OP-TEE TA devkit for build TAs"
 HOMEPAGE = "https://www.op-tee.org/"
 
-DEPENDS += "python3-pycryptodome-native"
+DEPENDS += "python3-pycryptodome-native liboqs"
+
+
+do_compile:prepend() {
+    mkdir -p ${B}/export-ta_${OPTEE_ARCH}/lib
+    cp ${RECIPE_SYSROOT}/usr/lib/liboqs.a ${B}/export-ta_${OPTEE_ARCH}/lib/  
+}
 
 do_install() {
     #install TA devkit
@@ -19,6 +25,7 @@ do_deploy() {
 }
 
 FILES:${PN} = "${includedir}/optee/"
+# FILES:${PN} += "${includedir}/optee/export-user_ta/lib"
 
 # Build paths are currently embedded
 INSANE_SKIP:${PN}-dev += "buildpaths"

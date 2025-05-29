@@ -38,6 +38,11 @@ EXTRA_OEMAKE += " CFG_TPM_LOG_BASE_ADDR=0x79640000"
 # Solve a TEE_ERROR_OUT_OF_MEMORY
 #EXTRA_OEMAKE += " CFG_TZDRAM_SIZE=0x00500000"
 
+do_compile:prepend() {
+    mkdir -p ${B}/export-ta_arm64/lib
+    cp ${RECIPE_SYSROOT}/usr/lib/liboqs.a ${B}/export-ta_arm64/lib/  
+}
+
 do_compile:append() {
 	${S}/scripts/gen_tee_bin.py --input ${B}/core/tee.elf --out_tee_raw_bin ${B}/core/tee_raw.bin
 }

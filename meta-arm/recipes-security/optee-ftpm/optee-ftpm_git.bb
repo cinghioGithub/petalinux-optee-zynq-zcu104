@@ -16,13 +16,24 @@ inherit deploy python3native
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=5a3925ece0806073ae9ebbb08ff6f11e"
 
-DEPENDS = "python3-pyelftools-native optee-os-tadevkit python3-cryptography-native "
+DEPENDS = "python3-pyelftools-native optee-os-tadevkit python3-cryptography-native liboqs"
 
 FTPM_UUID = "bc50d971-d4c9-42c4-82cb-343fb7f37896"
 
-SRC_URI = "gitsm://github.com/torsec/ms-tpm-20-ref;branch=measured-boot;protocol=https \
-           file://0001-add-enum-to-ta-flags.patch"
-SRCREV = "eca1d44094c818c46ab97fbb768a3439d032a40a"
+SRC_URI = "gitsm://github.com/torsec/ms-tpm-20-ref;branch=pq-ftpm;protocol=https \
+           "
+SRCREV = "18413b06ef0d7f567492cd6fdd507e3e11670a44"
+
+# no pq - only measured-boot
+# SRC_URI = "gitsm://github.com/torsec/ms-tpm-20-ref;branch=measured-boot;protocol=https \
+#            file://0001-add-enum-to-ta-flags.patch \
+#            "
+# SRCREV = "eca1d44094c818c46ab97fbb768a3439d032a40a"
+
+# pq ms-tpm-20-ref - updated version
+# SRC_URI = "gitsm://github.com/biondodaniel/ms-tpm-20-ref;branch=pq-measured;protocol=https \
+#            "
+# SRCREV = "7ef3dcb93a2fb1f4065a846202dd418fa360c641"
 
 UPSTREAM_CHECK_COMMITS = "1"
 
@@ -63,6 +74,11 @@ CFLAGS += "-Wno-implicit-function-declaration -Wno-incompatible-pointer-types"
 export OPENSSL_MODULES = "${STAGING_LIBDIR_NATIVE}/ossl-modules"
 
 PARALLEL_MAKE = ""
+
+do_compile:prepend() {
+    mkdir -p ${RECIPE_SYSROOT}/usr/include/optee/export-user_ta/include/oqs
+    cp ${RECIPE_SYSROOT}/usr/include/oqs/* ${RECIPE_SYSROOT}/usr/include/optee/export-user_ta/include/oqs/
+}
 
 do_compile() {
     # The internal ${CC} includes the correct -mcpu option
