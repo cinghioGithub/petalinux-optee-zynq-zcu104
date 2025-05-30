@@ -447,26 +447,38 @@ Before flashing, format the SD card to create two partitions:
 - One ext4 partition for the root filesystem.
 
 ### Clear previous files in temporary directories
-rm -rf sd1/*
-rm -rf sd2/*
+```text
+$ rm -rf sd1/*
+$ rm -rf sd2/*
+```
 
 ### Copy boot images from petalinux-project
-cp <petalinux-proj>/images/linux/{BOOT.BIN,image.ub,boot.scr} ./sd1
-cp <petalinux-proj>/images/linux/rootfs.tar.gz ./sd2
+```text
+$ cp <petalinux-proj>/images/linux/{BOOT.BIN,image.ub,boot.scr} ./sd1
+$ cp <petalinux-proj>/images/linux/rootfs.tar.gz ./sd2
+```
 
 ### Format the SD card partitions (adjust /dev/sdb1 and /dev/sdb2 as needed)
-sudo mkfs.vfat /dev/sdb1
-sudo mkfs.ext4 /dev/sdb2
+```text
+$ sudo mkfs.vfat /dev/sdb1
+$ sudo mkfs.ext4 /dev/sdb2
+```
 
 ### Mount the formatted partitions
-sudo mount /dev/sdb1 /mnt/boot/
-sudo mount /dev/sdb2 /mnt/rootfs/
+```text
+$ sudo mount /dev/sdb1 /mnt/boot/
+$ sudo mount /dev/sdb2 /mnt/rootfs/
+```
 
 ### Flash the boot image files and extract the rootfs tarball
-sudo cp sd1/* /mnt/boot/
-sudo tar xvfp sd2/rootfs.tar.gz --directory /mnt/rootfs
-sudo cp sd2/* /mnt/rootfs/
+```text
+$ sudo cp sd1/* /mnt/boot/
+$ sudo tar xvfp sd2/rootfs.tar.gz --directory /mnt/rootfs
+$ sudo cp sd2/* /mnt/rootfs/
+```
 
 ### Unmount the partitions
-sudo umount /mnt/boot
-sudo umount /mnt/rootfs
+```text
+$ sudo umount /mnt/boot
+$ sudo umount /mnt/rootfs
+```
