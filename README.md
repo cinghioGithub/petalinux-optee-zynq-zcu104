@@ -439,6 +439,66 @@ Use this command to obtain BOOT.bin image
 ```text
 $ petalinux-package boot --bif bootgen.bif --force
 ```
+## Enable AES-GCM Secure Boot
+
+This section describes how to enable Secure Boot with AES-GCM encryption using a 256-bit AES key stored in BBRAM on the ZCU104 board.
+
+### Step 1: Burn AES key into BBRAM
+To store the AES key in BBRAM, prepare a simple boot image containing the FSBL and a BBRAM programming ELF:
+
+```bif
+the_ROM_image:
+{
+    [bootloader, destination_cpu=a53-0] <petalinux-proj>/measured_boot_fsbl.elf
+    xilskey_bbramps_zynqmp_example.elf
+}
+```
+Use this command to generate BOOT.bin:
+
+```bash
+$ petalinux-package boot --bif file.bif --force
+```
+
+Note: The file xilskey_bbramps_zynqmp_example.elf is included in this repository. This binary burns a 256-bit AES key into BBRAM.
+Once booted, wait for confirmation that key burning was successful, then power off the board.
+
+### Step 2: Create encrypted boot image with AES-GCM
+After the key is burned, prepare a secure boot image where each partition is encrypted using the same key and IV (but in separate .nky files, as required by Bootgen):
+
+```bif
+the_ROM_image:
+{
+    [keysrc_encryption] bbram_red_key
+    [bootloader, destination_cpu=a53-0, encryption=aes, aeskeyfile=aes_key_fsbl.nky] <petalinux-proj>/measured_boot_fsbl.elf
+    [pmufw_image] images/linux/pmufw.elf
+    [destination_device=pl, encryption=aes, aeskeyfile=aes_key_bit.nky] images/linux/system.bit
+    [destination_cpu=a53-0, exception_level=el-3, trustzone, encryption=aes, aeskeyfile=aes_key_bl31.nky] images/linux/bl31.elf
+    [destination_cpu=a53-0, load=0x100000, encryption=aes, aeskeyfile=aes_key_dtb.nky] images/linux/system.dtb
+    [destination_cpu=a53-0, exception_level=el-2, encryption=aes, aeskeyfile=aes_key_uboot.nky] images/linux/u-boot.elf
+    [load=0x60000000, startup=0x60000000, exception_level=el-1, trustzone, destination_cpu=a53-0, encryption=aes, aeskeyfile=aes_key_optee.nky] images/linux/tee_raw.bin
+}
+```
+
+### Format of .nky key files
+Each .nky file specifies the AES key and IV used for encryption. Bootgen requires one file per partition, even if the key/IV is reused.
+
+Example content of aes_key_fsbl.nky:
+
+```text
+Device       xczu9eg;
+Key 0        A9E5F7C213D84599B624F3A9EC43AD41982EF672BE42A7E6C1D6E913FA52BC10;
+IV           8B49A2D30E99D5C3CFA27688D10F42EF;
+```
+Repeat this for each partition you want to encrypt. In our case:
+
+aes_key_fsbl.nky, aes_key_bl31.nky, aes_key_bit.nky, aes_key_uboot.nky, aes_key_dtb.nky, aes_key_optee.nky
+
+Tip: You can use the same key and IV in all files, but the filenames must be unique.
+
+### Final Notes
+Ensure the burned BBRAM key matches exactly the key in your .nky files.
+
+The key source in the .bif must be [keysrc_encryption] bbram_red_key.
 
 ## Prepare and Flash the SD Card
 
