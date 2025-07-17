@@ -186,9 +186,9 @@ In addition to updating the OP-TEE components, a patch is required to fix issues
 ### 1. Add this files
 
 - **Patch File:**  
-  `0001-combined-patch.patch`
+  `0001-optee-enable-ima-and-measured-boot.patch`
 
-This patch contains the necessary changes to resolve issues with IMA and fTPM.
+This patch contains the necessary changes to resolve issues with IMA and fTPM and sets SHA-384 as the default bank algorithm for IMA measurements.
 
 - **Ima config file:**
   `ima_hash.cfg`
@@ -207,7 +207,7 @@ CONFIG_IMA_DEFAULT_HASH set to sha256
      ```
   2. Modify the `linux-xlnx_%.bbappend` file to include files by adding the following line:
      ```bitbake
-      SRC_URI += "file://0001-combined-patch.patch \
+      SRC_URI += "file://0001-optee-enable-ima-and-measured-boot.patch \
                   file://ima_hash.cfg \
                   "
      ```
@@ -368,7 +368,7 @@ This section explains how to integrate liboqs (v0.10.0) into a PetaLinux project
 
     The recipe sources have been updated to point to modified upstream archives compatible with liboqs, and the recipes have been adapted accordingly to support these updated versions.
 
-### 4. Patch the Linux Kernel
+<!-- ### 4. Patch the Linux Kernel
 
   - **Target Patch File:**
 
@@ -388,9 +388,7 @@ This section explains how to integrate liboqs (v0.10.0) into a PetaLinux project
         SRC_URI += "file://0001-combined-patch.patch \
                     file://0002-combined-patch.patch \
                     file://ima_hash.cfg \
-                   "
-
-
+                   " -->
 
 ## Change the boot arguments for loading the rootfs from sd card
 

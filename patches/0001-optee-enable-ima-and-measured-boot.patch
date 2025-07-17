@@ -1,60 +1,57 @@
+From 181fd50eab2d3d356b6744c12037c745d6274ba9 Mon Sep 17 00:00:00 2001
+From: OpenEmbedded <oe.patch@oe>
+Date: Thu, 19 Jun 2025 15:25:50 +0000
+Subject: [PATCH] optee: enable ima and measured boot
+
+---
+ drivers/char/tpm/tpm-interface.c    |   2 +-
+ drivers/char/tpm/tpm.h              |   2 +-
+ drivers/char/tpm/tpm_ftpm_tee.c     |  81 ++++++++++++++++++
+ drivers/char/tpm/tpm_ftpm_tee.h     |   4 +-
+ include/linux/tpm.h                 |   6 +-
+ security/integrity/ima/ima.h        |  26 ++++--
+ security/integrity/ima/ima_crypto.c | 122 +++++++++++++++++++++++++++-
+ security/integrity/ima/ima_init.c   |   7 ++
+ security/integrity/ima/ima_main.c   |  20 ++++-
+ security/integrity/ima/ima_queue.c  |   6 +-
+ 10 files changed, 254 insertions(+), 22 deletions(-)
+
 diff --git a/drivers/char/tpm/tpm-interface.c b/drivers/char/tpm/tpm-interface.c
-index 66b16d26eecc..83228c03e033 100644
+index 66b16d26eecc..7de59db0ec8a 100644
 --- a/drivers/char/tpm/tpm-interface.c
 +++ b/drivers/char/tpm/tpm-interface.c
-@@ -82,6 +82,7 @@ static ssize_t tpm_try_transmit(struct tpm_chip *chip, void *buf, size_t bufsiz)
- 		return -E2BIG;
- 	}
- 
-+	pr_info("tpm_try_transmit --> chip->ops->send\n");
- 	rc = chip->ops->send(chip, buf, count);
- 	if (rc < 0) {
- 		if (rc != -EPIPE)
-@@ -170,6 +171,7 @@ ssize_t tpm_transmit(struct tpm_chip *chip, u8 *buf, size_t bufsiz)
- 	memcpy(save, buf, save_size);
- 
- 	for (;;) {
-+		pr_info("tpm_transmit --> tpm_try_transmit\n");
- 		ret = tpm_try_transmit(chip, buf, bufsiz);
- 		if (ret < 0)
- 			break;
-@@ -217,6 +219,7 @@ ssize_t tpm_transmit_cmd(struct tpm_chip *chip, struct tpm_buf *buf,
+@@ -217,7 +217,7 @@ ssize_t tpm_transmit_cmd(struct tpm_chip *chip, struct tpm_buf *buf,
  	int err;
  	ssize_t len;
  
-+	pr_info("tpm_transmit_cmd --> tpm_transmit\n");
- 	len = tpm_transmit(chip, buf->data, PAGE_SIZE);
+-	len = tpm_transmit(chip, buf->data, PAGE_SIZE);
++	len = tpm_transmit(chip, buf->data, 2 * PAGE_SIZE);
  	if (len <  0)
  		return len;
-@@ -329,6 +332,7 @@ int tpm_pcr_extend(struct tpm_chip *chip, u32 pcr_idx,
- 	}
  
- 	if (chip->flags & TPM_CHIP_FLAG_TPM2) {
-+		pr_info("tpm_pcr_extend: TPM2\n");
- 		rc = tpm2_pcr_extend(chip, pcr_idx, digests);
- 		goto out;
- 	}
-diff --git a/drivers/char/tpm/tpm2-cmd.c b/drivers/char/tpm/tpm2-cmd.c
-index 93545be190a5..12a21f41ca00 100644
---- a/drivers/char/tpm/tpm2-cmd.c
-+++ b/drivers/char/tpm/tpm2-cmd.c
-@@ -262,6 +262,7 @@ int tpm2_pcr_extend(struct tpm_chip *chip, u32 pcr_idx,
- 			       chip->allocated_banks[i].digest_size);
- 	}
+diff --git a/drivers/char/tpm/tpm.h b/drivers/char/tpm/tpm.h
+index 61445f1dc46d..13391b2218dc 100644
+--- a/drivers/char/tpm/tpm.h
++++ b/drivers/char/tpm/tpm.h
+@@ -32,7 +32,7 @@
+ #endif
  
-+	pr_info("tpm2_pcr_extend --> tpm_transmit_cmd\n");
- 	rc = tpm_transmit_cmd(chip, &buf, 0, "attempting extend a PCR value");
+ #define TPM_MINOR		224	/* officially assigned */
+-#define TPM_BUFSIZE		4096
++#define TPM_BUFSIZE		8192	//4096
+ #define TPM_NUM_DEVICES		65536
+ #define TPM_RETRY		50
  
- 	tpm_buf_destroy(&buf);
 diff --git a/drivers/char/tpm/tpm_ftpm_tee.c b/drivers/char/tpm/tpm_ftpm_tee.c
-index 76adb108076c..5ca53e36a8bf 100644
+index 76adb108076c..09bf66f3fb3f 100644
 --- a/drivers/char/tpm/tpm_ftpm_tee.c
 +++ b/drivers/char/tpm/tpm_ftpm_tee.c
-@@ -15,10 +15,15 @@
+@@ -15,10 +15,16 @@
  #include <linux/tee_drv.h>
  #include <linux/tpm.h>
  #include <linux/uuid.h>
 +//#include <linux/atomic.h>
++#include <linux/delay.h>
  
  #include "tpm.h"
  #include "tpm_ftpm_tee.h"
@@ -66,33 +63,80 @@ index 76adb108076c..5ca53e36a8bf 100644
  /*
   * TA_FTPM_UUID: BC50D971-D4C9-42C4-82CB-343FB7F37896
   *
-@@ -80,6 +85,8 @@ static int ftpm_tee_tpm_op_send(struct tpm_chip *chip, u8 *buf, size_t len)
- 	struct tee_param command_params[4];
- 	struct tee_shm *shm = pvt_data->shm;
- 
-+	pr_info("ftpm_tee_tpm_op_send\n");
-+
- 	if (len > MAX_COMMAND_SIZE) {
- 		dev_err(&chip->dev,
- 			"%s: len=%zd exceeds MAX_COMMAND_SIZE supported by fTPM TA\n",
-@@ -281,6 +288,25 @@ static int ftpm_tee_probe(struct device *dev)
+@@ -281,6 +287,81 @@ static int ftpm_tee_probe(struct device *dev)
  		goto out_chip;
  	}
  
 +	atomic_inc(&ima_reinit); //increments the value of ima_reinit by 1
 +	while(atomic_read(&_process_measurement) != 0){}; //busy-wait loop --> continuously checks the value of process_measurement until it becomes 0
-+	//wait_event(measurement_wq, atomic_read(&_process_measurement) == 0);
 +	ima_tpm_chip = chip;
 +	ima_reinit_crypto();
 +	ima_init_digests();
++
++	struct ima_queue_entry *qe;
++	struct ima_template_entry *entry;
++	u8 *digest;
++	struct tpm_digest *digests_arg;
++	int result;
++	u32 pcr = 10;  // Scegliere il PCR corretto
++	u16 alg_id;
++
++	list_for_each_entry(qe, &ima_measurements, later) {
++		entry = qe->entry;
++		struct tpm_digest *digests;
++		struct tpm_digest *free_tpm_digests;
++
++		digests = kcalloc(NR_BANKS(ima_tpm_chip) + ima_extra_slots,
++			  		  sizeof(*digests), GFP_NOFS);
++
++		for (int i = 0; i < NR_BANKS(ima_tpm_chip) + ima_extra_slots; i++) {
++			if(i < NR_BANKS(ima_tpm_chip)) {
++				if (ima_tpm_chip->allocated_banks[i].alg_id == TPM_ALG_SHA256) {
++					digests[i].alg_id = ima_tpm_chip->allocated_banks[i].alg_id;
++					continue;
++				}
++				
++				if (ima_tpm_chip->allocated_banks[i].alg_id == TPM_ALG_SHA1) {
++					digests[i].alg_id = ima_tpm_chip->allocated_banks[i].alg_id;
++					memcpy(digests[i].digest, entry->digests[i].digest, TPM_MAX_DIGEST_SIZE);
++					continue;
++				}
++
++				if (ima_tpm_chip->allocated_banks[i].alg_id == TPM_ALG_SHA384) {
++					digests[i].alg_id = ima_tpm_chip->allocated_banks[i].alg_id;
++					memcpy(digests[i].digest, entry->digests[i-1].digest, TPM_MAX_DIGEST_SIZE);
++					continue;
++				}
++			}
++		}
++
++		free_tpm_digests = entry->digests;
++		entry->digests = digests;
++		kfree(free_tpm_digests);
++	}
++
++	list_for_each_entry(qe, &ima_measurements, later) {
++		entry = qe->entry;
++		/* digest = entry->digests[ima_sha384_idx].digest;
++		printk("Allocated banks: ");
++		printk("\n");
++		for (int i = 0; i < ima_tpm_chip->nr_allocated_banks; i++) {
++			printk(KERN_CONT "alg_id=%04x ", ima_tpm_chip->allocated_banks[i].alg_id);
++		}
++		printk("\n"); */
++		digests_arg = entry->digests;
++		result = tpm_pcr_extend(ima_tpm_chip, pcr, digests_arg);
++			if (result != 0)
++				pr_err("Error Communicating to TPM chip, result: %d\n", result);
++	}
++
 +	atomic_set(&ima_reinit, 0); //sets the value of ima_reinit to 0
-+	//wake_up(&measurement_wq); // Wake up any waiting processes
-+	dev_err(dev, "tpm probe finished successfully\n");
++	pr_info("tpm probe finished successfully\n");
 +
 +	if (chip->flags & TPM_CHIP_FLAG_TPM2)
 +  		pr_info("optee-ftpm is a TPM 2.0\n");
 +  
-+	pr_info("optee-ftpm->nr_allocated_backs: %d\n", chip->nr_allocated_banks);
++	pr_info("optee-ftpm->nr_allocated_banks: %d\n", chip->nr_allocated_banks);
 +
 +	for (int i = 0; i < chip->nr_allocated_banks; i++) {
 +		pr_info("optee-ftpm bank digest size: %d\n", chip->allocated_banks[i].digest_size);
@@ -101,11 +145,57 @@ index 76adb108076c..5ca53e36a8bf 100644
  	return 0;
  
  out_chip:
+diff --git a/drivers/char/tpm/tpm_ftpm_tee.h b/drivers/char/tpm/tpm_ftpm_tee.h
+index f98daa7bf68c..8d58d2ba9143 100644
+--- a/drivers/char/tpm/tpm_ftpm_tee.h
++++ b/drivers/char/tpm/tpm_ftpm_tee.h
+@@ -15,8 +15,8 @@
+ #define FTPM_OPTEE_TA_EMULATE_PPI     (1)
+ 
+ /* max. buffer size supported by fTPM  */
+-#define MAX_COMMAND_SIZE       4096
+-#define MAX_RESPONSE_SIZE      4096
++#define MAX_COMMAND_SIZE       8192	//4096
++#define MAX_RESPONSE_SIZE      8192	//4096
+ 
+ /**
+  * struct ftpm_tee_private - fTPM's private data
+diff --git a/include/linux/tpm.h b/include/linux/tpm.h
+index 4ee9d13749ad..e1b45508adc4 100644
+--- a/include/linux/tpm.h
++++ b/include/linux/tpm.h
+@@ -337,7 +337,7 @@ static inline void tpm_buf_reset(struct tpm_buf *buf, u16 tag, u32 ordinal)
+ 
+ static inline int tpm_buf_init(struct tpm_buf *buf, u16 tag, u32 ordinal)
+ {
+-	buf->data = (u8 *)__get_free_page(GFP_KERNEL);
++	buf->data = (u8 *)__get_free_pages(GFP_KERNEL, 1);
+ 	if (!buf->data)
+ 		return -ENOMEM;
+ 
+@@ -348,7 +348,7 @@ static inline int tpm_buf_init(struct tpm_buf *buf, u16 tag, u32 ordinal)
+ 
+ static inline void tpm_buf_destroy(struct tpm_buf *buf)
+ {
+-	free_page((unsigned long)buf->data);
++	free_pages((unsigned long)buf->data, 1);
+ }
+ 
+ static inline u32 tpm_buf_length(struct tpm_buf *buf)
+@@ -376,7 +376,7 @@ static inline void tpm_buf_append(struct tpm_buf *buf,
+ 	if (buf->flags & TPM_BUF_OVERFLOW)
+ 		return;
+ 
+-	if ((len + new_len) > PAGE_SIZE) {
++	if ((len + new_len) > 2 * PAGE_SIZE) {
+ 		WARN(1, "tpm_buf: overflow\n");
+ 		buf->flags |= TPM_BUF_OVERFLOW;
+ 		return;
 diff --git a/security/integrity/ima/ima.h b/security/integrity/ima/ima.h
-index 07a4586e129c..be95e4389719 100644
+index 07a4586e129c..55c652e03d2b 100644
 --- a/security/integrity/ima/ima.h
 +++ b/security/integrity/ima/ima.h
-@@ -21,9 +21,15 @@
+@@ -21,9 +21,18 @@
  #include <linux/tpm.h>
  #include <linux/audit.h>
  #include <crypto/hash_info.h>
@@ -114,14 +204,17 @@ index 07a4586e129c..be95e4389719 100644
  
  #include "../integrity.h"
  
++extern int ima_sha384_idx;
++
 +extern atomic_t ima_reinit;
 +extern atomic_t _process_measurement;
-+extern wait_queue_head_t measurement_wq;
++extern struct tpm_digest *digests;
++extern struct ima_algo_desc *ima_algo_array;
 +
  enum ima_show_type { IMA_SHOW_BINARY, IMA_SHOW_BINARY_NO_FIELD_LEN,
  		     IMA_SHOW_BINARY_OLD_STRING_FMT, IMA_SHOW_ASCII };
  enum tpm_pcrs { TPM_PCR0 = 0, TPM_PCR8 = 8, TPM_PCR10 = 10 };
-@@ -50,10 +56,15 @@ extern int ima_policy_flag;
+@@ -50,10 +59,15 @@ extern int ima_policy_flag;
  extern atomic_t ima_setxattr_allowed_hash_algorithms;
  
  /* set during initialization */
@@ -141,7 +234,15 @@ index 07a4586e129c..be95e4389719 100644
  extern int ima_appraise;
  extern struct tpm_chip *ima_tpm_chip;
  extern const char boot_aggregate_name[];
-@@ -149,6 +160,7 @@ void ima_add_violation(struct file *file, const unsigned char *filename,
+@@ -109,6 +123,7 @@ struct ima_queue_entry {
+ 	struct ima_template_entry *entry;
+ };
+ extern struct list_head ima_measurements;	/* list of all measurements */
++extern struct list_head ima_new_measurements;	/* list of all measurements after ftpm init*/
+ 
+ /* Some details preceding the binary serialized measurement list */
+ struct ima_kexec_hdr {
+@@ -149,6 +164,7 @@ void ima_add_violation(struct file *file, const unsigned char *filename,
  		       struct integrity_iint_cache *iint,
  		       const char *op, const char *cause);
  int ima_init_crypto(void);
@@ -149,7 +250,7 @@ index 07a4586e129c..be95e4389719 100644
  void ima_putc(struct seq_file *m, void *data, int datalen);
  void ima_print_digest(struct seq_file *m, u8 *digest, u32 size);
  int template_desc_init_fields(const char *template_fmt,
-@@ -164,7 +176,7 @@ int ima_measurements_show(struct seq_file *m, void *v);
+@@ -164,7 +180,7 @@ int ima_measurements_show(struct seq_file *m, void *v);
  unsigned long ima_get_binary_runtime_size(void);
  int ima_init_template(void);
  void ima_init_template_list(void);
@@ -159,10 +260,10 @@ index 07a4586e129c..be95e4389719 100644
  			  void *lsm_data);
  
 diff --git a/security/integrity/ima/ima_crypto.c b/security/integrity/ima/ima_crypto.c
-index 51ad29940f05..5344ebd57514 100644
+index 51ad29940f05..b09e594b836d 100644
 --- a/security/integrity/ima/ima_crypto.c
 +++ b/security/integrity/ima/ima_crypto.c
-@@ -62,13 +62,16 @@ struct ima_algo_desc {
+@@ -62,15 +62,20 @@ struct ima_algo_desc {
  	enum hash_algo algo;
  };
  
@@ -171,6 +272,7 @@ index 51ad29940f05..5344ebd57514 100644
 +// int ima_sha1_idx __ro_after_init;
 +// int ima_hash_algo_idx __ro_after_init;
 +int ima_sha1_idx;
++int ima_sha384_idx;
 +int ima_hash_algo_idx;
  /*
   * Additional number of slots reserved, as needed, for SHA1
@@ -180,32 +282,22 @@ index 51ad29940f05..5344ebd57514 100644
 +//int ima_extra_slots __ro_after_init;
 +int ima_extra_slots;
  
- static struct ima_algo_desc *ima_algo_array;
+-static struct ima_algo_desc *ima_algo_array;
++// static struct ima_algo_desc *ima_algo_array;
++struct ima_algo_desc *ima_algo_array;
  
-@@ -88,6 +91,22 @@ static int __init ima_init_ima_crypto(void)
- 	return 0;
- }
- 
-+static int ima_reinit_ima_crypto(void)
-+{
-+	long rc;
-+
-+	ima_shash_tfm = crypto_alloc_shash(hash_algo_name[ima_hash_algo], 0, 0);
-+	if (IS_ERR(ima_shash_tfm)) {
-+		rc = PTR_ERR(ima_shash_tfm);
-+		pr_err("Can not allocate %s (reason: %ld)\n",
-+		       hash_algo_name[ima_hash_algo], rc);
-+		return rc;
-+	}
-+	pr_info("Allocated hash algorithm: %s\n",
-+		hash_algo_name[ima_hash_algo]);
-+	return 0;
-+}
-+
- static struct crypto_shash *ima_alloc_tfm(enum hash_algo algo)
+ static int __init ima_init_ima_crypto(void)
  {
- 	struct crypto_shash *tfm = ima_shash_tfm;
-@@ -211,6 +230,118 @@ int __init ima_init_crypto(void)
+@@ -143,6 +148,8 @@ int __init ima_init_crypto(void)
+ 	if (ima_hash_algo_idx < 0)
+ 		ima_hash_algo_idx = NR_BANKS(ima_tpm_chip) + ima_extra_slots++;
+ 
++	ima_sha384_idx = ima_hash_algo_idx;
++
+ 	ima_algo_array = kcalloc(NR_BANKS(ima_tpm_chip) + ima_extra_slots,
+ 				 sizeof(*ima_algo_array), GFP_KERNEL);
+ 	if (!ima_algo_array) {
+@@ -211,6 +218,113 @@ int __init ima_init_crypto(void)
  	return rc;
  }
  
@@ -225,10 +317,6 @@ index 51ad29940f05..5344ebd57514 100644
 +        crypto_free_shash(ima_algo_array[i].tfm);
 +    }
 +    kfree(ima_algo_array);
-+
-+	// rc = ima_reinit_ima_crypto();
-+    // if (rc)
-+    //     return rc;
 +
 +    ima_sha1_idx = -1;
 +    ima_hash_algo_idx = -1;
@@ -303,7 +391,6 @@ index 51ad29940f05..5344ebd57514 100644
 +        ima_algo_array[ima_hash_algo_idx].algo = ima_hash_algo;
 +    }
 +
-+	pr_err("ima reinit finished successfully\n");
 +    return 0;
 +
 +out_array:
@@ -350,40 +437,47 @@ index 63979aefc95f..e096948ec912 100644
  	if (!ima_tpm_chip)
  		pr_info("No TPM chip found, activating TPM-bypass!\n");
 diff --git a/security/integrity/ima/ima_main.c b/security/integrity/ima/ima_main.c
-index cc1217ac2c6f..0be93939b66d 100644
+index cc1217ac2c6f..9e9493a11855 100644
 --- a/security/integrity/ima/ima_main.c
 +++ b/security/integrity/ima/ima_main.c
-@@ -223,8 +223,15 @@ static int process_measurement(struct file *file, const struct cred *cred,
+@@ -35,7 +35,8 @@ int ima_appraise = IMA_APPRAISE_ENFORCE;
+ int ima_appraise;
+ #endif
+ 
+-int __ro_after_init ima_hash_algo = HASH_ALGO_SHA1;
++// int __ro_after_init ima_hash_algo = HASH_ALGO_SHA1;
++int ima_hash_algo = HASH_ALGO_SHA1;
+ static int hash_setup_done;
+ 
+ static struct notifier_block ima_lsm_policy_notifier = {
+@@ -223,8 +224,13 @@ static int process_measurement(struct file *file, const struct cred *cred,
  	enum hash_algo hash_algo;
  	unsigned int allowed_algos = 0;
  
 -	if (!ima_policy_flag || !S_ISREG(inode->i_mode))
 +	while(atomic_read(&ima_reinit) == 1){}; //busy-wait loop --> waits for ima_reinit to become 0 before proceeding
-+	// wait_event(measurement_wq, atomic_read(&ima_reinit) == 0);
 +	atomic_inc(&_process_measurement);
 +
 +	if (!ima_policy_flag || !S_ISREG(inode->i_mode)) {
 +		atomic_dec(&_process_measurement);
-+		// wake_up(&measurement_wq);
  		return 0;
 +	}
  
  	/* Return an IMA_MEASURE, IMA_APPRAISE, IMA_AUDIT action
  	 * bitmask based on the appraise/audit/measurement policy.
-@@ -236,8 +243,11 @@ static int process_measurement(struct file *file, const struct cred *cred,
+@@ -236,8 +242,10 @@ static int process_measurement(struct file *file, const struct cred *cred,
  	violation_check = ((func == FILE_CHECK || func == MMAP_CHECK ||
  			    func == MMAP_CHECK_REQPROT) &&
  			   (ima_policy_flag & IMA_MEASURE));
 -	if (!action && !violation_check)
 +	if (!action && !violation_check) {
 +		atomic_dec(&_process_measurement);
-+		// wake_up(&measurement_wq);
  		return 0;
 +	}
  
  	must_appraise = action & IMA_APPRAISE;
  
-@@ -395,6 +405,7 @@ static int process_measurement(struct file *file, const struct cred *cred,
+@@ -395,6 +403,7 @@ static int process_measurement(struct file *file, const struct cred *cred,
  				    pathname, "collect_data",
  				    "denied-hash-algorithm", rc, 0);
  	}
@@ -391,37 +485,40 @@ index cc1217ac2c6f..0be93939b66d 100644
  out_locked:
  	if ((mask & MAY_WRITE) && test_bit(IMA_DIGSIG, &iint->atomic_flags) &&
  	     !(iint->flags & IMA_NEW_FILE))
-@@ -406,11 +417,16 @@ static int process_measurement(struct file *file, const struct cred *cred,
+@@ -406,11 +415,14 @@ static int process_measurement(struct file *file, const struct cred *cred,
  	if (pathbuf)
  		__putname(pathbuf);
  	if (must_appraise) {
 -		if (rc && (ima_appraise & IMA_APPRAISE_ENFORCE))
 +		if (rc && (ima_appraise & IMA_APPRAISE_ENFORCE)) {
 +			atomic_dec(&_process_measurement); //decrements process_measurement
-+			// wake_up(&measurement_wq);
  			return -EACCES;
 +		}
  		if (file->f_mode & FMODE_WRITE)
  			set_bit(IMA_UPDATE_XATTR, &iint->atomic_flags);
  	}
 +	atomic_dec(&_process_measurement); //decrements process_measurement
-+	// wake_up(&measurement_wq);
  	return 0;
  }
  
 diff --git a/security/integrity/ima/ima_queue.c b/security/integrity/ima/ima_queue.c
-index 532da87ce519..b89d0ae4c3cd 100644
+index 532da87ce519..6f89edcd6e5b 100644
 --- a/security/integrity/ima/ima_queue.c
 +++ b/security/integrity/ima/ima_queue.c
-@@ -142,6 +142,7 @@ static int ima_pcr_extend(struct tpm_digest *digests_arg, int pcr)
- 	if (!ima_tpm_chip)
- 		return result;
+@@ -22,9 +22,11 @@
+ #define AUDIT_CAUSE_LEN_MAX 32
  
-+	pr_info("Adding entry to PCR\n");
- 	result = tpm_pcr_extend(ima_tpm_chip, pcr, digests_arg);
- 	if (result != 0)
- 		pr_err("Error Communicating to TPM chip, result: %d\n", result);
-@@ -211,7 +212,7 @@ int ima_restore_measurement_entry(struct ima_template_entry *entry)
+ /* pre-allocated array of tpm_digest structures to extend a PCR */
+-static struct tpm_digest *digests;
++// static struct tpm_digest *digests;
++struct tpm_digest *digests;
+ 
+ LIST_HEAD(ima_measurements);	/* list of all measurements */
++LIST_HEAD(ima_new_measurements);	/* list of all measurements after ftpm init*/
+ #ifdef CONFIG_IMA_KEXEC
+ static unsigned long binary_runtime_size;
+ #else
+@@ -211,7 +213,7 @@ int ima_restore_measurement_entry(struct ima_template_entry *entry)
  	return result;
  }
  
@@ -430,3 +527,6 @@ index 532da87ce519..b89d0ae4c3cd 100644
  {
  	u16 digest_size;
  	u16 crypto_id;
+-- 
+2.44.1
+
