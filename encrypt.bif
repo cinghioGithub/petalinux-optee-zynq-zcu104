@@ -1,0 +1,11 @@
+the_ROM_image:
+{
+    [keysrc_encryption] bbram_red_key
+    [bootloader, destination_cpu=a53-0, encryption=aes, aeskeyfile=aes_key_fsbl.nky] fsbl.elf
+    [pmufw_image] images/linux/pmufw.elf
+    [destination_device=pl, encryption=aes, aeskeyfile=aes_key_bit.nky] images/linux/system.bit
+    [destination_cpu=a53-0, exception_level=el-3, trustzone, encryption=aes, aeskeyfile=aes_key_bl31.nky] images/linux/bl31.elf
+    [destination_cpu=a53-0, load=0x100000, encryption=aes, aeskeyfile=aes_key_dtb.nky] images/linux/system.dtb
+    [destination_cpu=a53-0, exception_level=el-2, encryption=aes, aeskeyfile=aes_key_uboot.nky] images/linux/u-boot.elf
+    [load=0x60000000, startup=0x60000000, exception_level=el-1, trustzone, destination_cpu=a53-0, encryption=aes, aeskeyfile=aes_key_optee.nky] images/linux/tee_raw.bin
+}
