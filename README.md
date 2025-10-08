@@ -398,7 +398,12 @@ $ petalinux-config
 
 Navigate to ```DTG Settings -> Kernel Bootargs``` and disable ```generate boot args automatically```.
 
-Then set ```earlycon console=ttyUSB1,115200 root=/dev/mmcblk0p2 rw rootwait ima_policy=tcb ignore_loglevel``` in ```user set kernel bootargs```.
+Then set 
+
+```text
+earlycon console=ttyUSB1,115200 root=/dev/mmcblk0p2 rw rootwait ima_policy=tcb ignore_loglevel
+```
+in ```user set kernel bootargs```.
 
 Note: Ensure you verify the actual serial port to which the board is connected. 
 In this case, it is USB1, but it may vary depending on your setup. 
