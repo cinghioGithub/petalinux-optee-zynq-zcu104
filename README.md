@@ -1,6 +1,5 @@
-# Build OP-TEE with fTPM support, with Petalinux on Xilinx zcu104
+# Build OP-TEE with fTPM and IMA support, with Petalinux on Xilinx zcu104
 
-This is currently a work in progress.
 
 Testing with Petalinux v2024.2 and OP-TEE v4.5.0
 
